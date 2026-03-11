@@ -41,6 +41,7 @@ DEFAULT_ACCENT = "#60a5fa"
 DEFAULT_PALETTE = ["#0f1115", "#111827", "#0b1320", "#0a0f1a"]
 WHITEBOARD_BG = "#ffffff"
 WHITEBOARD_INK = "#111111"
+DEFAULT_SEED = 1337
 
 FONT_CANDIDATES = [
     "/System/Library/Fonts/HelveticaNeue.ttc",
@@ -170,7 +171,16 @@ def render_line_image(
     text_w = text_box[2] - text_box[0]
     text_h = text_box[3] - text_box[1]
     text_x = (width - text_w) / 2
-    text_y = (height - text_h) / 2
+    if style == "whiteboard":
+        anchor = str(whiteboard_cfg.get("text_anchor", "center")).lower()
+        if anchor == "top":
+            text_y = height * 0.16
+        elif anchor == "bottom":
+            text_y = height * 0.68
+        else:
+            text_y = (height - text_h) / 2
+    else:
+        text_y = (height - text_h) / 2
     stroke_width = int(whiteboard_cfg.get("stroke_width", 2)) if style == "whiteboard" else 0
     draw.multiline_text(
         (text_x, text_y),
@@ -182,6 +192,17 @@ def render_line_image(
         stroke_width=stroke_width,
         stroke_fill=text_fill if stroke_width else None,
     )
+
+    sketches = line.get("sketches")
+    if sketches:
+        draw_sketches(
+            draw=draw,
+            size=size,
+            sketches=sketches,
+            ink=text_fill,
+            seed=line.get("seed", index + 1),
+            thickness=max(2, int(min(width, height) * 0.003)),
+        )
 
     if style != "whiteboard":
         counter = f"{index + 1}/{total}"
@@ -209,6 +230,258 @@ def build_activation_map(size: Tuple[int, int], seed: int, bias: float) -> Image
 def reveal_mask(activation: Image.Image, progress: float) -> Image.Image:
     threshold = int(max(0.0, min(1.0, progress)) * 255)
     return activation.point(lambda v: 255 if v <= threshold else 0)
+
+
+def _to_px(value: float, total: int) -> float:
+    if 0 <= value <= 1:
+        return value * total
+    return value
+
+
+def draw_sketches(
+    draw: ImageDraw.ImageDraw,
+    size: Tuple[int, int],
+    sketches: List[Dict[str, Any]],
+    ink: Tuple[int, int, int],
+    seed: int,
+    thickness: int,
+) -> None:
+    width, height = size
+    rng = random.Random(seed)
+
+    for sketch in sketches:
+        kind = sketch.get("type", "person")
+        x = _to_px(float(sketch.get("x", 0.5)), width)
+        y = _to_px(float(sketch.get("y", 0.6)), height)
+        scale = float(sketch.get("scale", 1.0))
+
+        if kind == "person":
+            draw_person(draw, x, y, scale, ink, thickness, sketch, rng)
+        elif kind == "llm":
+            draw_llm(draw, x, y, scale, ink, thickness, rng)
+        elif kind == "crowd":
+            draw_crowd(draw, x, y, scale, ink, thickness, rng)
+        elif kind == "prompt_card":
+            draw_prompt_card(draw, x, y, scale, ink, thickness, rng)
+        elif kind == "speech":
+            draw_speech_bubble(draw, x, y, scale, ink, thickness)
+        elif kind == "warning":
+            draw_warning(draw, x, y, scale, ink, thickness)
+        elif kind == "shield":
+            draw_shield(draw, x, y, scale, ink, thickness)
+        elif kind == "heart":
+            draw_heart(draw, x, y, scale, ink, thickness)
+        elif kind == "stack":
+            draw_stack(draw, x, y, scale, ink, thickness)
+
+
+def draw_person(
+    draw: ImageDraw.ImageDraw,
+    x: float,
+    y: float,
+    scale: float,
+    ink: Tuple[int, int, int],
+    thickness: int,
+    spec: Dict[str, Any],
+    rng: random.Random,
+) -> None:
+    height = 180 * scale
+    head_r = 22 * scale
+    body_len = height * 0.6
+    leg_len = height * 0.35
+    arm_len = height * 0.35
+
+    # Head
+    draw.ellipse(
+        [x - head_r, y - height + head_r * 0.3, x + head_r, y - height + head_r * 2.3],
+        outline=ink,
+        width=thickness,
+    )
+    # Body
+    body_top = y - height + head_r * 2.3
+    body_bottom = body_top + body_len
+    draw.line([(x, body_top), (x, body_bottom)], fill=ink, width=thickness)
+    # Arms
+    arm_y = body_top + body_len * 0.35
+    draw.line([(x, arm_y), (x - arm_len * 0.6, arm_y + arm_len * 0.25)], fill=ink, width=thickness)
+    draw.line([(x, arm_y), (x + arm_len * 0.6, arm_y + arm_len * 0.25)], fill=ink, width=thickness)
+    # Legs
+    draw.line([(x, body_bottom), (x - leg_len * 0.35, body_bottom + leg_len)], fill=ink, width=thickness)
+    draw.line([(x, body_bottom), (x + leg_len * 0.35, body_bottom + leg_len)], fill=ink, width=thickness)
+
+    if spec.get("glasses"):
+        eye_y = y - height + head_r * 1.3
+        draw.rectangle([x - head_r * 0.6, eye_y, x - head_r * 0.1, eye_y + head_r * 0.35], outline=ink, width=thickness)
+        draw.rectangle([x + head_r * 0.1, eye_y, x + head_r * 0.6, eye_y + head_r * 0.35], outline=ink, width=thickness)
+        draw.line([(x - head_r * 0.1, eye_y + head_r * 0.2), (x + head_r * 0.1, eye_y + head_r * 0.2)], fill=ink, width=thickness)
+
+    if spec.get("tie"):
+        tie_top = body_top + body_len * 0.2
+        draw.line([(x, tie_top), (x, tie_top + body_len * 0.25)], fill=ink, width=thickness)
+
+    if spec.get("mood") == "angry":
+        brow_y = y - height + head_r * 0.9
+        draw.line([(x - head_r * 0.6, brow_y), (x - head_r * 0.1, brow_y - head_r * 0.2)], fill=ink, width=thickness)
+        draw.line([(x + head_r * 0.1, brow_y - head_r * 0.2), (x + head_r * 0.6, brow_y)], fill=ink, width=thickness)
+
+
+def draw_llm(
+    draw: ImageDraw.ImageDraw,
+    x: float,
+    y: float,
+    scale: float,
+    ink: Tuple[int, int, int],
+    thickness: int,
+    rng: random.Random,
+) -> None:
+    width = 140 * scale
+    height = 170 * scale
+    head_w = width * 0.7
+    head_h = height * 0.45
+    head_left = x - head_w / 2
+    head_top = y - height
+    draw.rectangle([head_left, head_top, head_left + head_w, head_top + head_h], outline=ink, width=thickness)
+    draw.line([(x, head_top), (x, head_top - head_h * 0.2)], fill=ink, width=thickness)
+    draw.ellipse(
+        [x - head_w * 0.08, head_top - head_h * 0.35, x + head_w * 0.08, head_top - head_h * 0.1],
+        outline=ink,
+        width=thickness,
+    )
+    eye_y = head_top + head_h * 0.35
+    draw.ellipse([x - head_w * 0.2, eye_y, x - head_w * 0.05, eye_y + head_w * 0.12], outline=ink, width=thickness)
+    draw.ellipse([x + head_w * 0.05, eye_y, x + head_w * 0.2, eye_y + head_w * 0.12], outline=ink, width=thickness)
+    mouth_y = head_top + head_h * 0.7
+    draw.line([(x - head_w * 0.18, mouth_y), (x + head_w * 0.18, mouth_y)], fill=ink, width=thickness)
+    body_top = head_top + head_h
+    draw.rectangle([x - width * 0.35, body_top, x + width * 0.35, body_top + height * 0.5], outline=ink, width=thickness)
+    draw.line([(x - width * 0.35, body_top + height * 0.2), (x + width * 0.35, body_top + height * 0.2)], fill=ink, width=thickness)
+
+
+def draw_crowd(
+    draw: ImageDraw.ImageDraw,
+    x: float,
+    y: float,
+    scale: float,
+    ink: Tuple[int, int, int],
+    thickness: int,
+    rng: random.Random,
+) -> None:
+    offsets = [(-80, 0), (0, 10), (80, -5)]
+    for i, (dx, dy) in enumerate(offsets):
+        draw_person(
+            draw,
+            x + dx * scale,
+            y + dy * scale,
+            0.75 * scale,
+            ink,
+            thickness,
+            {"glasses": i == 0},
+            rng,
+        )
+
+
+def draw_prompt_card(
+    draw: ImageDraw.ImageDraw,
+    x: float,
+    y: float,
+    scale: float,
+    ink: Tuple[int, int, int],
+    thickness: int,
+    rng: random.Random,
+) -> None:
+    w = 200 * scale
+    h = 120 * scale
+    left = x - w / 2
+    top = y - h / 2
+    draw.rectangle([left, top, left + w, top + h], outline=ink, width=thickness)
+    for i in range(3):
+        line_y = top + h * (0.25 + i * 0.2)
+        draw.line([(left + w * 0.1, line_y), (left + w * 0.9, line_y)], fill=ink, width=thickness)
+
+
+def draw_speech_bubble(
+    draw: ImageDraw.ImageDraw,
+    x: float,
+    y: float,
+    scale: float,
+    ink: Tuple[int, int, int],
+    thickness: int,
+) -> None:
+    w = 220 * scale
+    h = 120 * scale
+    left = x - w / 2
+    top = y - h / 2
+    draw.rectangle([left, top, left + w, top + h], outline=ink, width=thickness)
+    draw.polygon(
+        [(left + w * 0.2, top + h), (left + w * 0.3, top + h), (left + w * 0.25, top + h + 20 * scale)],
+        outline=ink,
+        fill=None,
+    )
+
+
+def draw_warning(
+    draw: ImageDraw.ImageDraw,
+    x: float,
+    y: float,
+    scale: float,
+    ink: Tuple[int, int, int],
+    thickness: int,
+) -> None:
+    size = 120 * scale
+    points = [(x, y - size / 2), (x - size / 2, y + size / 2), (x + size / 2, y + size / 2)]
+    draw.polygon(points, outline=ink)
+    draw.line([(x, y - size * 0.1), (x, y + size * 0.2)], fill=ink, width=thickness)
+    draw.ellipse([x - size * 0.05, y + size * 0.28, x + size * 0.05, y + size * 0.38], outline=ink, width=thickness)
+
+
+def draw_shield(
+    draw: ImageDraw.ImageDraw,
+    x: float,
+    y: float,
+    scale: float,
+    ink: Tuple[int, int, int],
+    thickness: int,
+) -> None:
+    w = 120 * scale
+    h = 150 * scale
+    points = [
+        (x - w / 2, y - h / 2),
+        (x + w / 2, y - h / 2),
+        (x + w / 2, y),
+        (x, y + h / 2),
+        (x - w / 2, y),
+    ]
+    draw.line(points + [points[0]], fill=ink, width=thickness)
+
+
+def draw_heart(
+    draw: ImageDraw.ImageDraw,
+    x: float,
+    y: float,
+    scale: float,
+    ink: Tuple[int, int, int],
+    thickness: int,
+) -> None:
+    size = 80 * scale
+    draw.ellipse([x - size * 0.5, y - size * 0.5, x, y], outline=ink, width=thickness)
+    draw.ellipse([x, y - size * 0.5, x + size * 0.5, y], outline=ink, width=thickness)
+    draw.line([(x - size * 0.5, y), (x, y + size * 0.6)], fill=ink, width=thickness)
+    draw.line([(x + size * 0.5, y), (x, y + size * 0.6)], fill=ink, width=thickness)
+
+
+def draw_stack(
+    draw: ImageDraw.ImageDraw,
+    x: float,
+    y: float,
+    scale: float,
+    ink: Tuple[int, int, int],
+    thickness: int,
+) -> None:
+    w = 180 * scale
+    h = 40 * scale
+    for i in range(3):
+        top = y - (i * (h + 8 * scale))
+        draw.rectangle([x - w / 2, top - h, x + w / 2, top], outline=ink, width=thickness)
 
 
 def build_audio(

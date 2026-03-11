@@ -83,6 +83,7 @@ Line fields:
 - `bg`: Optional hex background override for that line.
 - `accent`: Optional accent color for that line.
 - `image`: Optional path to an image used as the background.
+- `sketches`: Optional list of simple line-art drawings (people, LLM, prompts, icons).
 
 Voice fields:
 - `provider`: Currently supports `edge-tts`.
@@ -98,6 +99,13 @@ Whiteboard fields:
 - `draw_ratio`: Fraction of the line duration used for the draw-on animation.
 - `ink_threshold`: Threshold for line-art images (lower = more ink).
 - `stroke_width`: Text stroke width for marker-like lettering.
+- `text_anchor`: `top`, `center`, or `bottom` placement for text block.
+
+Sketch fields:
+- `type`: `person`, `llm`, `crowd`, `prompt_card`, `speech`, `warning`, `shield`, `heart`, `stack`.
+- `x`, `y`: Position (0..1 is relative, or absolute pixels).
+- `scale`: Size multiplier.
+- Optional `glasses`, `tie`, `mood` for `person`.
 
 ## Voiceover Setup
 
