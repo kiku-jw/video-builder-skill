@@ -7,7 +7,7 @@ description: Create narrated videos from text scripts, simple timelines, or stil
 
 ## Overview
 
-Build short narrated videos by turning a line-based script into audio, rendering simple frames, and encoding with ffmpeg.
+Build short narrated videos by turning a line-based script into audio, rendering simple frames, and encoding with ffmpeg. Includes a whiteboard-style marker animation mode.
 
 ## Workflow
 
@@ -31,8 +31,15 @@ Create a spec file like this:
   "title": "What It Feels Like to Be an LLM",
   "fps": 24,
   "size": [1280, 720],
+  "style": "whiteboard",
   "font": "/System/Library/Fonts/HelveticaNeue.ttc",
   "bg_palette": ["#0f1115", "#111827", "#0b1320"],
+  "whiteboard": {
+    "enabled": true,
+    "draw_ratio": 0.72,
+    "ink_threshold": 185,
+    "stroke_width": 2
+  },
   "voice": {
     "provider": "edge-tts",
     "voice": "ru-RU-SvetlanaNeural",
@@ -63,8 +70,10 @@ Common fields:
 - `title`: Optional title displayed at the top.
 - `fps`: Frames per second. Default is 24.
 - `size`: `[width, height]` in pixels. Default is `[1280, 720]`.
+- `style`: Use `whiteboard` for marker-style animation on white background.
 - `font`: Path to a TTF or TTC font file.
 - `bg_palette`: Array of hex colors used for backgrounds.
+- `whiteboard`: Optional config for whiteboard style.
 - `voice`: TTS configuration.
 - `music`: Optional background music with `path` and `gain_db`.
 
@@ -83,6 +92,12 @@ Voice fields:
 - `filter`: Optional ffmpeg filter chain for speech.
 - `audio_path`: Use an existing narration file instead of TTS.
 - `line_durations`: Optional list of per-line durations (seconds) when using `audio_path`.
+
+Whiteboard fields:
+- `enabled`: Set `true` to force whiteboard style.
+- `draw_ratio`: Fraction of the line duration used for the draw-on animation.
+- `ink_threshold`: Threshold for line-art images (lower = more ink).
+- `stroke_width`: Text stroke width for marker-like lettering.
 
 ## Voiceover Setup
 

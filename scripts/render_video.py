@@ -9,6 +9,7 @@ import argparse
 import asyncio
 import json
 import math
+import random
 import shutil
 import subprocess
 import sys
@@ -17,7 +18,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 try:
-    from PIL import Image, ImageDraw, ImageFont, ImageOps
+    from PIL import Image, ImageChops, ImageDraw, ImageFont, ImageOps
 except ImportError as exc:  # pragma: no cover
     raise SystemExit(
         "Pillow is required. Install with: python3 -m pip install --user pillow"
@@ -38,6 +39,8 @@ DEFAULT_FILTER = ""
 DEFAULT_BG = "#0f1115"
 DEFAULT_ACCENT = "#60a5fa"
 DEFAULT_PALETTE = ["#0f1115", "#111827", "#0b1320", "#0a0f1a"]
+WHITEBOARD_BG = "#ffffff"
+WHITEBOARD_INK = "#111111"
 
 FONT_CANDIDATES = [
     "/System/Library/Fonts/HelveticaNeue.ttc",
@@ -119,22 +122,37 @@ def render_line_image(
     palette: List[str],
     index: int,
     total: int,
+    style: str,
+    whiteboard_cfg: Dict[str, Any],
 ) -> Image.Image:
     width, height = size
-    bg_color = parse_color(line.get("bg"), palette[index % len(palette)] if palette else DEFAULT_BG)
-    accent_color = parse_color(line.get("accent"), DEFAULT_ACCENT)
+    if style == "whiteboard":
+        bg_color = parse_color(line.get("bg"), WHITEBOARD_BG)
+        accent_color = parse_color(line.get("accent"), WHITEBOARD_INK)
+        text_fill = parse_color(line.get("ink"), WHITEBOARD_INK)
+    else:
+        bg_color = parse_color(line.get("bg"), palette[index % len(palette)] if palette else DEFAULT_BG)
+        accent_color = parse_color(line.get("accent"), DEFAULT_ACCENT)
+        text_fill = (235, 238, 245)
 
     image_path = line.get("image")
     if image_path and Path(image_path).exists():
         base = Image.open(image_path).convert("RGB")
         base = ImageOps.fit(base, size, centering=(0.5, 0.5))
-        overlay = Image.new("RGBA", size, (0, 0, 0, 120))
-        img = Image.alpha_composite(base.convert("RGBA"), overlay).convert("RGB")
+        if style == "whiteboard":
+            threshold = int(whiteboard_cfg.get("ink_threshold", 185))
+            gray = ImageOps.autocontrast(base.convert("L"))
+            bw = gray.point(lambda v: 0 if v < threshold else 255)
+            img = bw.convert("RGB")
+        else:
+            overlay = Image.new("RGBA", size, (0, 0, 0, 120))
+            img = Image.alpha_composite(base.convert("RGBA"), overlay).convert("RGB")
     else:
         img = Image.new("RGB", size, bg_color)
 
     draw = ImageDraw.Draw(img)
-    draw.rectangle([0, 0, width, 6], fill=accent_color)
+    if style != "whiteboard":
+        draw.rectangle([0, 0, width, 6], fill=accent_color)
 
     title_font = load_font(font_path, size=int(height * 0.05))
     body_font = load_font(font_path, size=int(height * 0.06))
@@ -142,7 +160,8 @@ def render_line_image(
     if title:
         title_box = draw.textbbox((0, 0), title, font=title_font)
         title_x = (width - (title_box[2] - title_box[0])) / 2
-        draw.text((title_x, height * 0.08), title, font=title_font, fill=(220, 224, 235))
+        title_fill = text_fill if style == "whiteboard" else (220, 224, 235)
+        draw.text((title_x, height * 0.08), title, font=title_font, fill=title_fill)
 
     text = line.get("text", "").strip()
     wrap_width = max(20, int(width / (body_font.size * 0.55)))
@@ -152,23 +171,44 @@ def render_line_image(
     text_h = text_box[3] - text_box[1]
     text_x = (width - text_w) / 2
     text_y = (height - text_h) / 2
+    stroke_width = int(whiteboard_cfg.get("stroke_width", 2)) if style == "whiteboard" else 0
     draw.multiline_text(
         (text_x, text_y),
         wrapped,
         font=body_font,
-        fill=(235, 238, 245),
+        fill=text_fill,
         spacing=6,
         align="center",
+        stroke_width=stroke_width,
+        stroke_fill=text_fill if stroke_width else None,
     )
 
-    counter = f"{index + 1}/{total}"
-    counter_font = load_font(font_path, size=int(height * 0.03))
-    counter_box = draw.textbbox((0, 0), counter, font=counter_font)
-    counter_x = width - (counter_box[2] - counter_box[0]) - width * 0.05
-    counter_y = height - (counter_box[3] - counter_box[1]) - height * 0.06
-    draw.text((counter_x, counter_y), counter, font=counter_font, fill=(140, 150, 170))
+    if style != "whiteboard":
+        counter = f"{index + 1}/{total}"
+        counter_font = load_font(font_path, size=int(height * 0.03))
+        counter_box = draw.textbbox((0, 0), counter, font=counter_font)
+        counter_x = width - (counter_box[2] - counter_box[0]) - width * 0.05
+        counter_y = height - (counter_box[3] - counter_box[1]) - height * 0.06
+        draw.text((counter_x, counter_y), counter, font=counter_font, fill=(140, 150, 170))
 
     return img
+
+
+def build_activation_map(size: Tuple[int, int], seed: int, bias: float) -> Image.Image:
+    width, height = size
+    rng = random.Random(seed)
+    small_w = max(24, width // 40)
+    small_h = max(14, height // 40)
+    noise_small = Image.new("L", (small_w, small_h))
+    noise_small.putdata([rng.randrange(0, 256) for _ in range(small_w * small_h)])
+    noise = noise_small.resize((width, height), resample=Image.BILINEAR)
+    gradient = Image.linear_gradient("L").rotate(90, expand=True).resize((width, height))
+    return ImageChops.blend(noise, gradient, bias)
+
+
+def reveal_mask(activation: Image.Image, progress: float) -> Image.Image:
+    threshold = int(max(0.0, min(1.0, progress)) * 255)
+    return activation.point(lambda v: 255 if v <= threshold else 0)
 
 
 def build_audio(
@@ -325,6 +365,10 @@ def render_video(spec: Dict[str, Any], out_path: Path, workdir: Path) -> None:
     font_path = spec.get("font")
     palette = spec.get("bg_palette", DEFAULT_PALETTE)
     lines = spec.get("lines", [])
+    style = spec.get("style", "default")
+    whiteboard_cfg = spec.get("whiteboard", {})
+    if whiteboard_cfg.get("enabled"):
+        style = "whiteboard"
 
     if not lines:
         raise SystemExit("Spec must include a non-empty 'lines' array.")
@@ -355,11 +399,31 @@ def render_video(spec: Dict[str, Any], out_path: Path, workdir: Path) -> None:
             palette=palette,
             index=idx,
             total=total_lines,
+            style=style,
+            whiteboard_cfg=whiteboard_cfg,
         )
-        for _ in range(frame_count):
-            frame_path = frames_dir / f"frame_{frame_index:05d}.png"
-            img.save(frame_path)
-            frame_index += 1
+        if style == "whiteboard":
+            draw_ratio = float(whiteboard_cfg.get("draw_ratio", 0.72))
+            draw_frames = max(1, int(frame_count * draw_ratio))
+            hold_frames = max(0, frame_count - draw_frames)
+            activation = build_activation_map(size, seed=idx * 1013 + int(duration * 100), bias=0.35)
+            white_bg = Image.new("RGB", size, parse_color(WHITEBOARD_BG, WHITEBOARD_BG))
+            for i in range(draw_frames):
+                progress = 1.0 if draw_frames == 1 else i / (draw_frames - 1)
+                mask = reveal_mask(activation, progress)
+                frame = Image.composite(img, white_bg, mask)
+                frame_path = frames_dir / f"frame_{frame_index:05d}.png"
+                frame.save(frame_path)
+                frame_index += 1
+            for _ in range(hold_frames):
+                frame_path = frames_dir / f"frame_{frame_index:05d}.png"
+                img.save(frame_path)
+                frame_index += 1
+        else:
+            for _ in range(frame_count):
+                frame_path = frames_dir / f"frame_{frame_index:05d}.png"
+                img.save(frame_path)
+                frame_index += 1
 
     run(
         [
