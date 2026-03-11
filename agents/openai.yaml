@@ -1,0 +1,4 @@
+interface:
+  display_name: "Video Builder"
+  short_description: "Assemble narrated videos with ffmpeg + edge-tts."
+  default_prompt: "Build a short narrated video from a script and render it with ffmpeg."
