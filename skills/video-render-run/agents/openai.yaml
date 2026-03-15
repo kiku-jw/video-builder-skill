@@ -1,0 +1,4 @@
+interface:
+  display_name: "Video Render Run"
+  short_description: "Render and validate MP4 output from an existing video spec"
+  default_prompt: "Use $video-render-run to render and validate an MP4 from this existing video spec JSON."

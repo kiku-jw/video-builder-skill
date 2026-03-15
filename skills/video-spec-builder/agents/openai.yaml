@@ -1,0 +1,4 @@
+interface:
+  display_name: "Video Spec Builder"
+  short_description: "Build minimal JSON specs for the local video renderer"
+  default_prompt: "Use $video-spec-builder to turn this script and asset list into a minimal JSON spec for the local video renderer."
